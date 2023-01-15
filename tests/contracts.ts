@@ -6,6 +6,7 @@ import {
   mintTo,
   getAccount,
   getOrCreateAssociatedTokenAccount,
+  Account,
 } from "@solana/spl-token";
 import { assert } from "chai";
 import { Contracts } from "../target/types/contracts";
@@ -119,17 +120,16 @@ describe("contracts", () => {
       vaultPDAAddress,
       mint,
       vaultAuthorityAddress,
+      buidlAccount,
     };
   };
 
-  it("Initialize Build", async () => {
-    initBuidl();
-  });
-
-  it("Deposits from another wallet", async () => {
-    const { userAta, vaultPDAAddress, mint, vaultAuthorityAddress } =
-      await initBuidl();
-
+  const depositTokens = async (
+    userAta: Account,
+    vaultPDAAddress: anchor.web3.PublicKey,
+    mint: anchor.web3.PublicKey,
+    vaultAuthorityAddress: anchor.web3.PublicKey
+  ) => {
     const depositTx = await program.methods
       .deposit(new anchor.BN(500))
       .accounts({
@@ -147,5 +147,49 @@ describe("contracts", () => {
     let fetchedVault = await getAccount(connection, vaultPDAAddress);
 
     assert.equal(fetchedVault.amount.toString(), "1500");
+  };
+
+  it("Initialize Build", async () => {
+    initBuidl();
+  });
+
+  it("Deposits from another wallet", async () => {
+    const { userAta, vaultPDAAddress, mint, vaultAuthorityAddress } =
+      await initBuidl();
+
+    await depositTokens(userAta, vaultPDAAddress, mint, vaultAuthorityAddress);
+  });
+
+  it("Creates a proposal", async () => {
+    const {
+      userAta,
+      vaultPDAAddress,
+      mint,
+      vaultAuthorityAddress,
+      buidlAccount,
+    } = await initBuidl();
+
+    await depositTokens(userAta, vaultPDAAddress, mint, vaultAuthorityAddress);
+
+    const proposalAccount = anchor.web3.Keypair.generate();
+
+    const proposalTx = await program.methods
+      .createProposal(new anchor.BN(1000), DB_ID)
+      .accounts({
+        payer: userWallet.publicKey,
+        proposalAccount: proposalAccount.publicKey,
+        vault: vaultPDAAddress,
+        buidlAccount: buidlAccount.publicKey,
+      })
+      .rpc();
+
+    console.log("proposalTx: ", proposalTx);
+
+    const proposalAccountData = await program.account.proposalAccount.fetch(
+      proposalAccount.publicKey
+    );
+
+    assert.equal(proposalAccountData.amount.toString(), "1000");
+    assert.equal(proposalAccountData.dbId, DB_ID);
   });
 });

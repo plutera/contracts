@@ -8,6 +8,8 @@ const DISCRIMINATOR_LENGTH: usize = 8;
 const PUBLIC_KEY_LENGTH: usize = 32;
 const STRING_LENGTH_PREFIX: usize = 4;
 const STRING_CHAR_MULTIPLIER: usize = 4;
+const DB_ID_LENGTH: usize = STRING_LENGTH_PREFIX + (24 * STRING_CHAR_MULTIPLIER);
+const U64_LENGTH: usize = 8;
 
 #[program]
 pub mod contracts {
@@ -50,8 +52,6 @@ pub mod contracts {
     }
 
     pub fn deposit(ctx: Context<Deposit>, amount: u64) -> Result<()> {
-        // token::transfer(ctx.accounts.into_transfer_to_pda_context(), amount)?;
-
         let depositor = &ctx.accounts.depositor;
         let vault = &ctx.accounts.vault;
         let depoitor_token_account = &ctx.accounts.depositor_token_account;
@@ -68,6 +68,24 @@ pub mod contracts {
             ),
             amount,
         )?;
+
+        Ok(())
+    }
+
+    pub fn create_proposal(ctx: Context<CreateProposal>, amount: u64, db_id: String) -> Result<()> {
+        let buidl_account = &ctx.accounts.buidl_account;
+        let proposal_account = &mut ctx.accounts.proposal_account;
+        let vault = &ctx.accounts.vault;
+
+        if amount > vault.amount {
+            return Err(ErrorCode::InsufficientFunds.into());
+        }
+
+        proposal_account.buidl_account = buidl_account.key();
+        proposal_account.db_id = db_id;
+        proposal_account.amount = amount;
+        proposal_account.upvotes = 0;
+        proposal_account.downvotes = 0;
 
         Ok(())
     }
@@ -113,6 +131,18 @@ pub struct Deposit<'info> {
     pub depositor_token_account: AccountInfo<'info>,
 }
 
+#[derive(Accounts)]
+pub struct CreateProposal<'info> {
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    pub buidl_account: Account<'info, BuidlAccount>,
+    pub system_program: Program<'info, System>,
+    pub rent: Sysvar<'info, Rent>,
+    #[account(init, payer = payer, space = ProposalAccount::LEN)]
+    pub proposal_account: Account<'info, ProposalAccount>,
+    pub vault: Account<'info, TokenAccount>,
+}
+
 #[account]
 pub struct BuidlAccount {
     pub owner: Pubkey,
@@ -121,14 +151,30 @@ pub struct BuidlAccount {
     pub token: Pubkey,
 }
 
-const DB_ID_LENGTH: usize = STRING_LENGTH_PREFIX + (24 * STRING_CHAR_MULTIPLIER);
-
 impl BuidlAccount {
     pub const LEN: usize = DISCRIMINATOR_LENGTH // discriminator
         + PUBLIC_KEY_LENGTH // owner
         + DB_ID_LENGTH // DB ID
         + PUBLIC_KEY_LENGTH // vault account
         + PUBLIC_KEY_LENGTH; // token
+}
+
+#[account]
+pub struct ProposalAccount {
+    pub buidl_account: Pubkey,
+    pub db_id: String,
+    pub amount: u64,
+    pub upvotes: u64,
+    pub downvotes: u64,
+}
+
+impl ProposalAccount {
+    pub const LEN: usize = DISCRIMINATOR_LENGTH // discriminator
+        + PUBLIC_KEY_LENGTH // buidl account
+        + DB_ID_LENGTH // DB ID
+        + U64_LENGTH // amount
+        + U64_LENGTH // upvotes
+        + U64_LENGTH; // downvotes
 }
 
 impl<'info> InitializeBuidl<'info> {
@@ -139,4 +185,10 @@ impl<'info> InitializeBuidl<'info> {
         };
         CpiContext::new(self.token_program.to_account_info(), cpi_accounts)
     }
+}
+
+#[error_code]
+pub enum ErrorCode {
+    #[msg("Insufficient funds")]
+    InsufficientFunds,
 }
