@@ -10,6 +10,7 @@ const STRING_LENGTH_PREFIX: usize = 4;
 const STRING_CHAR_MULTIPLIER: usize = 4;
 const DB_ID_LENGTH: usize = STRING_LENGTH_PREFIX + (24 * STRING_CHAR_MULTIPLIER);
 const U64_LENGTH: usize = 8;
+const I64_LENGTH: usize = 8;
 
 #[program]
 pub mod contracts {
@@ -72,13 +73,25 @@ pub mod contracts {
         Ok(())
     }
 
-    pub fn create_proposal(ctx: Context<CreateProposal>, amount: u64, db_id: String) -> Result<()> {
+    pub fn create_proposal(
+        ctx: Context<CreateProposal>,
+        amount: u64,
+        db_id: String,
+        withdrawer_token_account: Pubkey,
+        end_after_days: i64,
+    ) -> Result<()> {
         let buidl_account = &ctx.accounts.buidl_account;
         let proposal_account = &mut ctx.accounts.proposal_account;
         let vault = &ctx.accounts.vault;
 
+        let clock = Clock::get()?;
+
         if amount > vault.amount {
             return Err(ErrorCode::InsufficientFunds.into());
+        }
+
+        if end_after_days < 3 {
+            return Err(ErrorCode::ProposalTooShort.into());
         }
 
         proposal_account.buidl_account = buidl_account.key();
@@ -86,6 +99,9 @@ pub mod contracts {
         proposal_account.amount = amount;
         proposal_account.upvotes = 0;
         proposal_account.downvotes = 0;
+
+        proposal_account.end_timestamp = clock.unix_timestamp + (end_after_days * 86400);
+        proposal_account.withdrawer_token_account = withdrawer_token_account;
 
         Ok(())
     }
@@ -184,6 +200,8 @@ pub struct ProposalAccount {
     pub amount: u64,
     pub upvotes: u64,
     pub downvotes: u64,
+    pub withdrawer_token_account: Pubkey,
+    pub end_timestamp: i64,
 }
 
 impl ProposalAccount {
@@ -192,7 +210,9 @@ impl ProposalAccount {
         + DB_ID_LENGTH // DB ID
         + U64_LENGTH // amount
         + U64_LENGTH // upvotes
-        + U64_LENGTH; // downvotes
+        + U64_LENGTH // downvotes
+        + PUBLIC_KEY_LENGTH // send to
+        + I64_LENGTH; // end timestamp
 }
 
 impl<'info> InitializeBuidl<'info> {
@@ -209,4 +229,6 @@ impl<'info> InitializeBuidl<'info> {
 pub enum ErrorCode {
     #[msg("Insufficient funds")]
     InsufficientFunds,
+    #[msg("Proposal must be for at least 3 days")]
+    ProposalTooShort,
 }

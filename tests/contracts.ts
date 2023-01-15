@@ -154,9 +154,15 @@ describe("contracts", () => {
     buidlAccount: anchor.web3.Keypair
   ) => {
     const proposalAccount = anchor.web3.Keypair.generate();
+    const withdrawer_token_account = anchor.web3.PublicKey.unique();
 
     const proposalTx = await program.methods
-      .createProposal(new anchor.BN(1000), DB_ID)
+      .createProposal(
+        new anchor.BN(1000),
+        DB_ID,
+        withdrawer_token_account,
+        new anchor.BN(7)
+      )
       .accounts({
         payer: userWallet.publicKey,
         proposalAccount: proposalAccount.publicKey,
@@ -172,8 +178,22 @@ describe("contracts", () => {
       proposalAccount.publicKey
     );
 
+    const proposalEndDate = new Date(
+      Number(proposalAccountData.endTimestamp.toString()) * 1000
+    ).getDate();
+
+    const sevenDaysFromNow = new Date(
+      new Date().getTime() + 7 * 24 * 60 * 60 * 1000
+    ).getDate();
+
+    assert.equal(proposalEndDate, sevenDaysFromNow);
+
     assert.equal(proposalAccountData.amount.toString(), "1000");
     assert.equal(proposalAccountData.dbId, DB_ID);
+    assert.equal(
+      proposalAccountData.withdrawerTokenAccount.toString(),
+      withdrawer_token_account.toString()
+    );
 
     return {
       proposalAccount,
@@ -218,8 +238,15 @@ describe("contracts", () => {
 
     const proposalAccount = anchor.web3.Keypair.generate();
 
+    const withdrawer_token_account = anchor.web3.PublicKey.unique();
+
     await program.methods
-      .createProposal(new anchor.BN(3000), DB_ID)
+      .createProposal(
+        new anchor.BN(3000),
+        DB_ID,
+        withdrawer_token_account,
+        new anchor.BN(7)
+      )
       .accounts({
         payer: userWallet.publicKey,
         proposalAccount: proposalAccount.publicKey,
