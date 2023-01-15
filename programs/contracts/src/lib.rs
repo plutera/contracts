@@ -101,17 +101,15 @@ pub struct Deposit<'info> {
     pub vault: Account<'info, TokenAccount>,
     pub token_program: Program<'info, Token>,
     #[account(mut)]
-    /// CHECK: idk
+    /// CHECK: we are not writing to this account
     pub vault_authority: AccountInfo<'info>,
-    /// CHECK: idk
-    pub buidl_account: AccountInfo<'info>,
-    /// CHECK: idk
+    /// CHECK: we are not writing to this account
     #[account(mut)]
     pub mint: AccountInfo<'info>,
     #[account(mut)]
     pub depositor: Signer<'info>,
+    /// CHECK: we are not writing to this account
     #[account(mut)]
-    /// CHECK: idk
     pub depositor_token_account: AccountInfo<'info>,
 }
 

@@ -6,7 +6,6 @@ import {
   mintTo,
   getAccount,
   getOrCreateAssociatedTokenAccount,
-  createAssociatedTokenAccount,
 } from "@solana/spl-token";
 import { assert } from "chai";
 import { Contracts } from "../target/types/contracts";
@@ -21,7 +20,7 @@ describe("contracts", () => {
   const connection = anchor.getProvider().connection;
   const userWallet = anchor.workspace.Contracts.provider.wallet;
 
-  it("Initialize Build", async () => {
+  const initBuidl = async () => {
     const mint = await createMint(
       connection,
       userWallet.payer,
@@ -81,7 +80,7 @@ describe("contracts", () => {
       .signers([buidlAccount])
       .rpc();
 
-    console.log(tx);
+    console.log("init buidl tx: ", tx);
 
     await mintTo(
       connection,
@@ -114,74 +113,26 @@ describe("contracts", () => {
       fetchedVault.owner.toString(),
       vaultAuthorityAddress.toString()
     );
+
+    return {
+      userAta,
+      vaultPDAAddress,
+      mint,
+      vaultAuthorityAddress,
+    };
+  };
+
+  it("Initialize Build", async () => {
+    initBuidl();
   });
 
   it("Deposits from another wallet", async () => {
-    const mint = await createMint(
-      connection,
-      userWallet.payer,
-      userWallet.publicKey,
-      userWallet.publicKey,
-      6
-    );
-
-    const userAta = await getOrCreateAssociatedTokenAccount(
-      connection,
-      userWallet.payer,
-      mint,
-      userWallet.publicKey
-    );
-
-    await mintTo(
-      connection,
-      userWallet.payer,
-      mint,
-      userAta.address,
-      userWallet.publicKey,
-      1000
-    );
-
-    const buidlAccount = anchor.web3.Keypair.generate();
-
-    const [vaultPDAAddress] = anchor.web3.PublicKey.findProgramAddressSync(
-      [
-        Buffer.from("vault"),
-        buidlAccount.publicKey.toBuffer(),
-        mint.toBuffer(),
-      ],
-      program.programId
-    );
-
-    const [vaultAuthorityAddress] =
-      anchor.web3.PublicKey.findProgramAddressSync(
-        [
-          Buffer.from("authority"),
-          buidlAccount.publicKey.toBuffer(),
-          mint.toBuffer(),
-        ],
-        program.programId
-      );
-
-    const initTx = await program.methods
-      .initializeBuidl(DB_ID)
-      .accounts({
-        owner: userWallet.publicKey,
-        mint: mint,
-        tokenProgram: TOKEN_PROGRAM_ID,
-        systemProgram: anchor.web3.SystemProgram.programId,
-        buidlAccount: buidlAccount.publicKey,
-        rent: anchor.web3.SYSVAR_RENT_PUBKEY,
-        vault: vaultPDAAddress,
-      })
-      .signers([buidlAccount])
-      .rpc();
-
-    console.log("initTx: ", initTx);
+    const { userAta, vaultPDAAddress, mint, vaultAuthorityAddress } =
+      await initBuidl();
 
     const depositTx = await program.methods
-      .deposit(new anchor.BN(1000))
+      .deposit(new anchor.BN(500))
       .accounts({
-        buidlAccount: buidlAccount.publicKey,
         depositor: userWallet.publicKey,
         depositorTokenAccount: userAta.address,
         vault: vaultPDAAddress,
@@ -195,6 +146,6 @@ describe("contracts", () => {
 
     let fetchedVault = await getAccount(connection, vaultPDAAddress);
 
-    assert.equal(fetchedVault.amount.toString(), "1000");
+    assert.equal(fetchedVault.amount.toString(), "1500");
   });
 });
