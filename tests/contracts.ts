@@ -149,6 +149,37 @@ describe("contracts", () => {
     assert.equal(fetchedVault.amount.toString(), "1500");
   };
 
+  const createProposal = async (
+    vaultPDAAddress: anchor.web3.PublicKey,
+    buidlAccount: anchor.web3.Keypair
+  ) => {
+    const proposalAccount = anchor.web3.Keypair.generate();
+
+    const proposalTx = await program.methods
+      .createProposal(new anchor.BN(1000), DB_ID)
+      .accounts({
+        payer: userWallet.publicKey,
+        proposalAccount: proposalAccount.publicKey,
+        vault: vaultPDAAddress,
+        buidlAccount: buidlAccount.publicKey,
+      })
+      .signers([proposalAccount])
+      .rpc();
+
+    console.log("proposalTx: ", proposalTx);
+
+    const proposalAccountData = await program.account.proposalAccount.fetch(
+      proposalAccount.publicKey
+    );
+
+    assert.equal(proposalAccountData.amount.toString(), "1000");
+    assert.equal(proposalAccountData.dbId, DB_ID);
+
+    return {
+      proposalAccount,
+    };
+  };
+
   it("Initialize Build", async () => {
     initBuidl();
   });
@@ -171,27 +202,7 @@ describe("contracts", () => {
 
     await depositTokens(userAta, vaultPDAAddress, mint, vaultAuthorityAddress);
 
-    const proposalAccount = anchor.web3.Keypair.generate();
-
-    const proposalTx = await program.methods
-      .createProposal(new anchor.BN(1000), DB_ID)
-      .accounts({
-        payer: userWallet.publicKey,
-        proposalAccount: proposalAccount.publicKey,
-        vault: vaultPDAAddress,
-        buidlAccount: buidlAccount.publicKey,
-      })
-      .signers([proposalAccount])
-      .rpc();
-
-    console.log("proposalTx: ", proposalTx);
-
-    const proposalAccountData = await program.account.proposalAccount.fetch(
-      proposalAccount.publicKey
-    );
-
-    assert.equal(proposalAccountData.amount.toString(), "1000");
-    assert.equal(proposalAccountData.dbId, DB_ID);
+    await createProposal(vaultPDAAddress, buidlAccount);
   });
 
   it("Fails to create a proposal if the proposal amount is higher than available amount", async () => {
@@ -223,5 +234,69 @@ describe("contracts", () => {
           "AnchorError occurred. Error Code: InsufficientFunds. Error Number: 6000. Error Message: Insufficient funds."
         );
       });
+  });
+
+  it("can upvote a proposal", async () => {
+    const {
+      userAta,
+      vaultPDAAddress,
+      mint,
+      vaultAuthorityAddress,
+      buidlAccount,
+    } = await initBuidl();
+
+    await depositTokens(userAta, vaultPDAAddress, mint, vaultAuthorityAddress);
+
+    const { proposalAccount } = await createProposal(
+      vaultPDAAddress,
+      buidlAccount
+    );
+
+    const upvoteTx = await program.methods
+      .vote(true)
+      .accounts({
+        proposalAccount: proposalAccount.publicKey,
+      })
+      .rpc();
+
+    console.log("upvoteTx: ", upvoteTx);
+
+    const proposalAccountData = await program.account.proposalAccount.fetch(
+      proposalAccount.publicKey
+    );
+
+    assert.equal(proposalAccountData.upvotes.toString(), "1");
+  });
+
+  it("can downvote a proposal", async () => {
+    const {
+      userAta,
+      vaultPDAAddress,
+      mint,
+      vaultAuthorityAddress,
+      buidlAccount,
+    } = await initBuidl();
+
+    await depositTokens(userAta, vaultPDAAddress, mint, vaultAuthorityAddress);
+
+    const { proposalAccount } = await createProposal(
+      vaultPDAAddress,
+      buidlAccount
+    );
+
+    const downvoteTx = await program.methods
+      .vote(false)
+      .accounts({
+        proposalAccount: proposalAccount.publicKey,
+      })
+      .rpc();
+
+    console.log("downvoteTx: ", downvoteTx);
+
+    const proposalAccountData = await program.account.proposalAccount.fetch(
+      proposalAccount.publicKey
+    );
+
+    assert.equal(proposalAccountData.downvotes.toString(), "1");
   });
 });

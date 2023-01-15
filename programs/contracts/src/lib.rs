@@ -89,6 +89,18 @@ pub mod contracts {
 
         Ok(())
     }
+
+    pub fn vote(ctx: Context<Vote>, upvote: bool) -> Result<()> {
+        let proposal_account = &mut ctx.accounts.proposal_account;
+
+        if upvote {
+            proposal_account.upvotes += 1;
+        } else {
+            proposal_account.downvotes += 1;
+        }
+
+        Ok(())
+    }
 }
 
 #[derive(Accounts)]
@@ -141,6 +153,12 @@ pub struct CreateProposal<'info> {
     #[account(init, payer = payer, space = ProposalAccount::LEN)]
     pub proposal_account: Account<'info, ProposalAccount>,
     pub vault: Account<'info, TokenAccount>,
+}
+
+#[derive(Accounts)]
+pub struct Vote<'info> {
+    #[account(mut)]
+    pub proposal_account: Account<'info, ProposalAccount>,
 }
 
 #[account]
