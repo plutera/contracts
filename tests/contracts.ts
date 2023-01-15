@@ -181,6 +181,7 @@ describe("contracts", () => {
         vault: vaultPDAAddress,
         buidlAccount: buidlAccount.publicKey,
       })
+      .signers([proposalAccount])
       .rpc();
 
     console.log("proposalTx: ", proposalTx);
@@ -191,5 +192,36 @@ describe("contracts", () => {
 
     assert.equal(proposalAccountData.amount.toString(), "1000");
     assert.equal(proposalAccountData.dbId, DB_ID);
+  });
+
+  it("Fails to create a proposal if the proposal amount is higher than available amount", async () => {
+    const {
+      userAta,
+      vaultPDAAddress,
+      mint,
+      vaultAuthorityAddress,
+      buidlAccount,
+    } = await initBuidl();
+
+    await depositTokens(userAta, vaultPDAAddress, mint, vaultAuthorityAddress);
+
+    const proposalAccount = anchor.web3.Keypair.generate();
+
+    await program.methods
+      .createProposal(new anchor.BN(3000), DB_ID)
+      .accounts({
+        payer: userWallet.publicKey,
+        proposalAccount: proposalAccount.publicKey,
+        vault: vaultPDAAddress,
+        buidlAccount: buidlAccount.publicKey,
+      })
+      .signers([proposalAccount])
+      .rpc()
+      .catch((err) => {
+        assert.equal(
+          err.message,
+          "AnchorError occurred. Error Code: InsufficientFunds. Error Number: 6000. Error Message: Insufficient funds."
+        );
+      });
   });
 });
