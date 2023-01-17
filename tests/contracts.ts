@@ -311,7 +311,7 @@ describe("contracts", () => {
       });
   });
 
-  it("can upvote a proposal", async () => {
+  it("can vote on a proposal", async () => {
     const {
       userAta,
       vaultPDAAddress,
@@ -333,57 +333,105 @@ describe("contracts", () => {
       buidlAccount
     );
 
-    const upvoteTx = await program.methods
+    const voterPDA = anchor.web3.PublicKey.findProgramAddressSync(
+      [
+        Buffer.from("vote"),
+        proposalAccount.publicKey.toBuffer(),
+        userWallet.publicKey.toBuffer(),
+      ],
+      program.programId
+    )[0];
+
+    const voteTx = await program.methods
       .vote(true)
       .accounts({
         proposalAccount: proposalAccount.publicKey,
+        voter: userWallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+        voterAccount: voterPDA,
       })
       .rpc();
 
-    // console.log("upvoteTx: ", upvoteTx);
+    // console.log("voteTx: ", voteTx);
 
     const proposalAccountData = await program.account.proposalAccount.fetch(
       proposalAccount.publicKey
+    );
+
+    const voterAccountData = await program.account.backerVoteAccount.fetch(
+      voterPDA
     );
 
     assert.equal(proposalAccountData.upvotes.toString(), "1");
-  });
-
-  it("can downvote a proposal", async () => {
-    const {
-      userAta,
-      vaultPDAAddress,
-      mint,
-      vaultAuthorityAddress,
-      buidlAccount,
-    } = await initBuidl();
-
-    await depositTokens(
-      userAta,
-      vaultPDAAddress,
-      mint,
-      vaultAuthorityAddress,
-      buidlAccount
+    assert.equal(proposalAccountData.downvotes.toString(), "0");
+    assert.equal(voterAccountData.upvote, true);
+    assert.equal(
+      voterAccountData.proposalAccount.toString(),
+      proposalAccount.publicKey.toString()
+    );
+    assert.equal(
+      voterAccountData.address.toString(),
+      userWallet.publicKey.toString()
     );
 
-    const { proposalAccount } = await createProposal(
-      vaultPDAAddress,
-      buidlAccount
-    );
+    await program.methods
+      .vote(true)
+      .accounts({
+        proposalAccount: proposalAccount.publicKey,
+        voter: userWallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+        voterAccount: voterPDA,
+      })
+      .rpc()
+      .catch((err) => {
+        assert.equal(
+          err.message,
+          "AnchorError occurred. Error Code: AlreadyVoted. Error Number: 6004. Error Message: Already voted the same vote on this proposal."
+        );
+      });
 
-    const downvoteTx = await program.methods
+    const voteTx2 = await program.methods
       .vote(false)
       .accounts({
         proposalAccount: proposalAccount.publicKey,
+        voter: userWallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+        voterAccount: voterPDA,
       })
       .rpc();
 
-    // console.log("downvoteTx: ", downvoteTx);
+    // console.log("voteTx2: ", voteTx2);
 
-    const proposalAccountData = await program.account.proposalAccount.fetch(
+    const proposalAccountData2 = await program.account.proposalAccount.fetch(
       proposalAccount.publicKey
     );
 
-    assert.equal(proposalAccountData.downvotes.toString(), "1");
+    const voterAccountData2 = await program.account.backerVoteAccount.fetch(
+      voterPDA
+    );
+
+    assert.equal(proposalAccountData2.upvotes.toString(), "0");
+    assert.equal(proposalAccountData2.downvotes.toString(), "1");
+    assert.equal(voterAccountData2.upvote, false);
+    assert.equal(
+      voterAccountData2.proposalAccount.toString(),
+      proposalAccount.publicKey.toString()
+    );
+
+    await program.methods
+      .vote(false)
+      .accounts({
+        proposalAccount: proposalAccount.publicKey,
+        voter: userWallet.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+        voterAccount: voterPDA,
+      })
+      .rpc()
+      .catch((err) => {
+        assert.equal(
+          err.message,
+          "AnchorError occurred. Error Code: AlreadyVoted. Error Number: 6004. Error Message: Already voted the same vote on this proposal."
+        );
+      });
   });
 });

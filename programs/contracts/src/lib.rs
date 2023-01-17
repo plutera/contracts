@@ -11,6 +11,7 @@ const STRING_CHAR_MULTIPLIER: usize = 4;
 const DB_ID_LENGTH: usize = STRING_LENGTH_PREFIX + (24 * STRING_CHAR_MULTIPLIER);
 const U64_LENGTH: usize = 8;
 const I64_LENGTH: usize = 8;
+const BOOL_LENGTH: usize = 1;
 
 #[program]
 pub mod contracts {
@@ -133,12 +134,47 @@ pub mod contracts {
 
     pub fn vote(ctx: Context<Vote>, upvote: bool) -> Result<()> {
         let proposal_account = &mut ctx.accounts.proposal_account;
+        let voter_account = &mut ctx.accounts.voter_account;
 
-        if upvote {
-            proposal_account.upvotes += 1;
+        let clock = Clock::get()?;
+
+        if !voter_account.voted {
+            voter_account.proposal_account = proposal_account.key();
+            voter_account.timestamp = clock.unix_timestamp;
+            voter_account.address = ctx.accounts.voter.key();
+
+            if upvote {
+                voter_account.upvote = true;
+                proposal_account.upvotes += 1;
+            } else {
+                voter_account.upvote = false;
+                proposal_account.downvotes += 1;
+            }
         } else {
-            proposal_account.downvotes += 1;
+            voter_account.timestamp = clock.unix_timestamp;
+
+            if upvote {
+                if voter_account.upvote {
+                    return Err(ErrorCode::AlreadyVoted.into());
+                } else {
+                    proposal_account.downvotes -= 1;
+                }
+
+                voter_account.upvote = true;
+                proposal_account.upvotes += 1;
+            } else {
+                if !voter_account.upvote {
+                    return Err(ErrorCode::AlreadyVoted.into());
+                } else {
+                    proposal_account.upvotes -= 1;
+                }
+
+                voter_account.upvote = false;
+                proposal_account.downvotes += 1;
+            }
         }
+
+        voter_account.voted = true;
 
         Ok(())
     }
@@ -210,6 +246,17 @@ pub struct CreateProposal<'info> {
 pub struct Vote<'info> {
     #[account(mut)]
     pub proposal_account: Account<'info, ProposalAccount>,
+    #[account(mut)]
+    pub voter: Signer<'info>,
+    pub system_program: Program<'info, System>,
+    #[account(
+        init_if_needed,
+        payer = voter,
+        space = BackerAccount::LEN,
+        seeds = [b"vote", proposal_account.key().as_ref(), voter.key().as_ref()],
+        bump
+    )]
+    pub voter_account: Account<'info, BackerVoteAccount>,
 }
 
 #[account]
@@ -266,6 +313,24 @@ impl BackerAccount {
         + PUBLIC_KEY_LENGTH; // buidl account
 }
 
+#[account]
+pub struct BackerVoteAccount {
+    pub address: Pubkey,
+    pub proposal_account: Pubkey,
+    pub upvote: bool,
+    pub timestamp: i64,
+    pub voted: bool,
+}
+
+impl BackerVoteAccount {
+    pub const LEN: usize = DISCRIMINATOR_LENGTH // discriminator
+        + PUBLIC_KEY_LENGTH // address
+        + PUBLIC_KEY_LENGTH // proposal account
+        + BOOL_LENGTH // upvote
+        + I64_LENGTH // timestamp
+        + BOOL_LENGTH; // voted
+}
+
 impl<'info> InitializeBuidl<'info> {
     fn into_set_authority_context(&self) -> CpiContext<'_, '_, '_, 'info, SetAuthority<'info>> {
         let cpi_accounts = SetAuthority {
@@ -285,4 +350,6 @@ pub enum ErrorCode {
     #[msg("Amount too low")]
     AmountTooLow,
     Overflow,
+    #[msg("Already voted the same vote on this proposal")]
+    AlreadyVoted,
 }
