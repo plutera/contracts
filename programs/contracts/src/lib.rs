@@ -178,6 +178,46 @@ pub mod contracts {
 
         Ok(())
     }
+
+    pub fn check_proposal(ctx: Context<CheckProposal>) -> Result<()> {
+        let proposal_account = &ctx.accounts.proposal_account;
+        let vault = &ctx.accounts.vault;
+        let token_program = &ctx.accounts.token_program;
+        let buidl_account = &ctx.accounts.buidl_account;
+        let vault_authority = &ctx.accounts.vault_authority;
+        let mint = &ctx.accounts.mint;
+
+        let clock = Clock::get()?;
+
+        // if clock.unix_timestamp > proposal_account.end_timestamp {
+        if proposal_account.upvotes <= proposal_account.downvotes {
+            return Err(ErrorCode::ProposalNotPassed.into());
+        }
+
+        let withdrawer_token_account = &ctx.accounts.withdrawer_token_account;
+
+        transfer(
+            CpiContext::new_with_signer(
+                token_program.to_account_info(),
+                Transfer {
+                    from: vault.to_account_info(),
+                    to: withdrawer_token_account.to_account_info(),
+                    authority: vault_authority.to_account_info(),
+                },
+                &[&[
+                    b"authority",
+                    buidl_account.key().as_ref(),
+                    mint.key().as_ref(),
+                ]],
+            ),
+            proposal_account.amount,
+        )?;
+        // } else {
+        //     return Err(ErrorCode::ProposalNotOver.into());
+        // }
+
+        Ok(())
+    }
 }
 
 #[derive(Accounts)]
@@ -207,7 +247,11 @@ pub struct Deposit<'info> {
     #[account(mut)]
     pub vault: Account<'info, TokenAccount>,
     pub token_program: Program<'info, Token>,
-    #[account(mut)]
+    #[account(
+        mut,
+        seeds = [b"authority", buidl_account.key().as_ref(), mint.key().as_ref()],
+        bump
+    )]
     /// CHECK: we are not writing to this account
     pub vault_authority: AccountInfo<'info>,
     /// CHECK: we are not writing to this account
@@ -257,6 +301,28 @@ pub struct Vote<'info> {
         bump
     )]
     pub voter_account: Account<'info, BackerVoteAccount>,
+}
+
+#[derive(Accounts)]
+pub struct CheckProposal<'info> {
+    #[account(mut)]
+    pub proposal_account: Account<'info, ProposalAccount>,
+    #[account(mut)]
+    pub buidl_account: Account<'info, BuidlAccount>,
+    #[account(mut)]
+    pub vault: Account<'info, TokenAccount>,
+    pub token_program: Program<'info, Token>,
+    #[account(mut)]
+    /// CHECK: we are just depositting tokens
+    pub withdrawer_token_account: AccountInfo<'info>,
+    #[account(
+        mut,
+        seeds = [b"authority", buidl_account.key().as_ref(), mint.key().as_ref()],
+        bump
+    )]
+    /// CHECK: we are not writing to this account
+    pub vault_authority: AccountInfo<'info>,
+    pub mint: Account<'info, Mint>,
 }
 
 #[account]
@@ -352,4 +418,8 @@ pub enum ErrorCode {
     Overflow,
     #[msg("Already voted the same vote on this proposal")]
     AlreadyVoted,
+    #[msg("The proposal is ongoing. You can't withdraw yet")]
+    ProposalNotOver,
+    #[msg("The proposal didn't pass. You can't withdraw")]
+    ProposalNotPassed,
 }

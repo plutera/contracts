@@ -222,6 +222,47 @@ describe("contracts", () => {
 
     return {
       proposalAccount,
+      withdrawer_token_account,
+    };
+  };
+
+  const createAccountAndVote = async (
+    proposal_account: anchor.web3.PublicKey,
+    upvote: boolean
+  ) => {
+    const voterAccount = anchor.web3.Keypair.generate();
+
+    const signature = await program.provider.connection.requestAirdrop(
+      voterAccount.publicKey,
+      1000000000
+    );
+    await program.provider.connection.confirmTransaction(signature);
+
+    const voterPDA = anchor.web3.PublicKey.findProgramAddressSync(
+      [
+        Buffer.from("vote"),
+        proposal_account.toBuffer(),
+        voterAccount.publicKey.toBuffer(),
+      ],
+      program.programId
+    )[0];
+
+    const voteTx = await program.methods
+      .vote(upvote)
+      .accounts({
+        voter: voterAccount.publicKey,
+        voterAccount: voterPDA,
+        proposalAccount: proposal_account,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .signers([voterAccount])
+      .rpc();
+
+    // console.log("voteTx: ", voteTx);
+
+    return {
+      voterAccount,
+      voterPDA,
     };
   };
 
@@ -433,5 +474,51 @@ describe("contracts", () => {
           "AnchorError occurred. Error Code: AlreadyVoted. Error Number: 6004. Error Message: Already voted the same vote on this proposal."
         );
       });
+  });
+
+  it("can withdraw tokens from a proposal", async () => {
+    const {
+      userAta,
+      vaultPDAAddress,
+      mint,
+      vaultAuthorityAddress,
+      buidlAccount,
+    } = await initBuidl();
+
+    await depositTokens(
+      userAta,
+      vaultPDAAddress,
+      mint,
+      vaultAuthorityAddress,
+      buidlAccount
+    );
+
+    const { proposalAccount, withdrawer_token_account } = await createProposal(
+      vaultPDAAddress,
+      buidlAccount
+    );
+
+    await createAccountAndVote(proposalAccount.publicKey, true);
+
+    await createAccountAndVote(proposalAccount.publicKey, false);
+
+    await createAccountAndVote(proposalAccount.publicKey, false);
+
+    await createAccountAndVote(proposalAccount.publicKey, true);
+
+    await createAccountAndVote(proposalAccount.publicKey, true);
+
+    const checkProposalTx = await program.methods
+      .checkProposal()
+      .accounts({
+        buidlAccount: buidlAccount.publicKey,
+        proposalAccount: proposalAccount.publicKey,
+        vault: vaultPDAAddress,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        withdrawerTokenAccount: withdrawer_token_account,
+        vaultAuthority: vaultAuthorityAddress,
+        mint,
+      })
+      .rpc();
   });
 });
