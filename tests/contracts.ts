@@ -81,7 +81,7 @@ describe("contracts", () => {
       .signers([buidlAccount])
       .rpc();
 
-    console.log("init buidl tx: ", tx);
+    // console.log("init buidl tx: ", tx);
 
     await mintTo(
       connection,
@@ -128,8 +128,18 @@ describe("contracts", () => {
     userAta: Account,
     vaultPDAAddress: anchor.web3.PublicKey,
     mint: anchor.web3.PublicKey,
-    vaultAuthorityAddress: anchor.web3.PublicKey
+    vaultAuthorityAddress: anchor.web3.PublicKey,
+    buidlAccount: anchor.web3.Keypair
   ) => {
+    const backerAccountPDA = anchor.web3.PublicKey.findProgramAddressSync(
+      [
+        Buffer.from("backer"),
+        buidlAccount.publicKey.toBuffer(),
+        userWallet.publicKey.toBuffer(),
+      ],
+      program.programId
+    )[0];
+
     const depositTx = await program.methods
       .deposit(new anchor.BN(500))
       .accounts({
@@ -139,14 +149,29 @@ describe("contracts", () => {
         mint: mint,
         tokenProgram: TOKEN_PROGRAM_ID,
         vaultAuthority: vaultAuthorityAddress,
+        backerAccount: backerAccountPDA,
+        buidlAccount: buidlAccount.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
       })
       .rpc();
 
-    console.log("depositTx: ", depositTx);
+    // console.log("depositTx: ", depositTx);
 
     let fetchedVault = await getAccount(connection, vaultPDAAddress);
+    let fetchedBackerAccount = await program.account.backerAccount.fetch(
+      backerAccountPDA
+    );
 
     assert.equal(fetchedVault.amount.toString(), "1500");
+    assert.equal(fetchedBackerAccount.amount.toString(), "500");
+    assert.equal(
+      fetchedBackerAccount.address.toString(),
+      userWallet.publicKey.toString()
+    );
+    assert.equal(
+      fetchedBackerAccount.buidlAccount.toString(),
+      buidlAccount.publicKey.toBase58()
+    );
   };
 
   const createProposal = async (
@@ -172,7 +197,7 @@ describe("contracts", () => {
       .signers([proposalAccount])
       .rpc();
 
-    console.log("proposalTx: ", proposalTx);
+    // console.log("proposalTx: ", proposalTx);
 
     const proposalAccountData = await program.account.proposalAccount.fetch(
       proposalAccount.publicKey
@@ -205,10 +230,21 @@ describe("contracts", () => {
   });
 
   it("Deposits from another wallet", async () => {
-    const { userAta, vaultPDAAddress, mint, vaultAuthorityAddress } =
-      await initBuidl();
+    const {
+      userAta,
+      vaultPDAAddress,
+      mint,
+      vaultAuthorityAddress,
+      buidlAccount,
+    } = await initBuidl();
 
-    await depositTokens(userAta, vaultPDAAddress, mint, vaultAuthorityAddress);
+    await depositTokens(
+      userAta,
+      vaultPDAAddress,
+      mint,
+      vaultAuthorityAddress,
+      buidlAccount
+    );
   });
 
   it("Creates a proposal", async () => {
@@ -220,7 +256,13 @@ describe("contracts", () => {
       buidlAccount,
     } = await initBuidl();
 
-    await depositTokens(userAta, vaultPDAAddress, mint, vaultAuthorityAddress);
+    await depositTokens(
+      userAta,
+      vaultPDAAddress,
+      mint,
+      vaultAuthorityAddress,
+      buidlAccount
+    );
 
     await createProposal(vaultPDAAddress, buidlAccount);
   });
@@ -234,7 +276,13 @@ describe("contracts", () => {
       buidlAccount,
     } = await initBuidl();
 
-    await depositTokens(userAta, vaultPDAAddress, mint, vaultAuthorityAddress);
+    await depositTokens(
+      userAta,
+      vaultPDAAddress,
+      mint,
+      vaultAuthorityAddress,
+      buidlAccount
+    );
 
     const proposalAccount = anchor.web3.Keypair.generate();
 
@@ -272,7 +320,13 @@ describe("contracts", () => {
       buidlAccount,
     } = await initBuidl();
 
-    await depositTokens(userAta, vaultPDAAddress, mint, vaultAuthorityAddress);
+    await depositTokens(
+      userAta,
+      vaultPDAAddress,
+      mint,
+      vaultAuthorityAddress,
+      buidlAccount
+    );
 
     const { proposalAccount } = await createProposal(
       vaultPDAAddress,
@@ -286,7 +340,7 @@ describe("contracts", () => {
       })
       .rpc();
 
-    console.log("upvoteTx: ", upvoteTx);
+    // console.log("upvoteTx: ", upvoteTx);
 
     const proposalAccountData = await program.account.proposalAccount.fetch(
       proposalAccount.publicKey
@@ -304,7 +358,13 @@ describe("contracts", () => {
       buidlAccount,
     } = await initBuidl();
 
-    await depositTokens(userAta, vaultPDAAddress, mint, vaultAuthorityAddress);
+    await depositTokens(
+      userAta,
+      vaultPDAAddress,
+      mint,
+      vaultAuthorityAddress,
+      buidlAccount
+    );
 
     const { proposalAccount } = await createProposal(
       vaultPDAAddress,
@@ -318,7 +378,7 @@ describe("contracts", () => {
       })
       .rpc();
 
-    console.log("downvoteTx: ", downvoteTx);
+    // console.log("downvoteTx: ", downvoteTx);
 
     const proposalAccountData = await program.account.proposalAccount.fetch(
       proposalAccount.publicKey

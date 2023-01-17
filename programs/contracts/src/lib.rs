@@ -57,6 +57,31 @@ pub mod contracts {
         let vault = &ctx.accounts.vault;
         let depoitor_token_account = &ctx.accounts.depositor_token_account;
         let token_program = &ctx.accounts.token_program;
+        let backer_account = &mut ctx.accounts.backer_account;
+        let buidl_account = &ctx.accounts.buidl_account;
+
+        let clock = Clock::get()?;
+
+        if amount.lt(&1) {
+            return Err(ErrorCode::AmountTooLow.into());
+        }
+
+        if backer_account.address.eq(&Pubkey::default()) {
+            backer_account.address = depositor.key();
+        }
+
+        if backer_account.buidl_account.eq(&Pubkey::default()) {
+            backer_account.buidl_account = buidl_account.key();
+        }
+
+        if backer_account.since_timestamp.eq(&0) {
+            backer_account.since_timestamp = clock.unix_timestamp;
+        }
+
+        match backer_account.amount.checked_add(amount) {
+            Some(new_amount) => backer_account.amount = new_amount,
+            None => return Err(ErrorCode::Overflow.into()),
+        }
 
         transfer(
             CpiContext::new(
@@ -157,6 +182,16 @@ pub struct Deposit<'info> {
     /// CHECK: we are not writing to this account
     #[account(mut)]
     pub depositor_token_account: AccountInfo<'info>,
+    pub buidl_account: Account<'info, BuidlAccount>,
+    #[account(
+        init_if_needed,
+        payer = depositor,
+        space = BackerAccount::LEN,
+        seeds = [b"backer", buidl_account.key().as_ref(), depositor.key().as_ref()],
+        bump
+    )]
+    pub backer_account: Account<'info, BackerAccount>,
+    pub system_program: Program<'info, System>,
 }
 
 #[derive(Accounts)]
@@ -215,6 +250,22 @@ impl ProposalAccount {
         + I64_LENGTH; // end timestamp
 }
 
+#[account]
+pub struct BackerAccount {
+    pub address: Pubkey,
+    pub amount: u64,
+    pub since_timestamp: i64,
+    pub buidl_account: Pubkey,
+}
+
+impl BackerAccount {
+    pub const LEN: usize = DISCRIMINATOR_LENGTH // discriminator
+        + PUBLIC_KEY_LENGTH // address
+        + U64_LENGTH // amount
+        + I64_LENGTH // since timestamp
+        + PUBLIC_KEY_LENGTH; // buidl account
+}
+
 impl<'info> InitializeBuidl<'info> {
     fn into_set_authority_context(&self) -> CpiContext<'_, '_, '_, 'info, SetAuthority<'info>> {
         let cpi_accounts = SetAuthority {
@@ -231,4 +282,7 @@ pub enum ErrorCode {
     InsufficientFunds,
     #[msg("Proposal must be for at least 3 days")]
     ProposalTooShort,
+    #[msg("Amount too low")]
+    AmountTooLow,
+    Overflow,
 }
