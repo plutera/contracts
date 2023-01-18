@@ -1,6 +1,5 @@
 use anchor_lang::prelude::*;
-use anchor_spl::token::spl_token::instruction::AuthorityType;
-use anchor_spl::token::{self, Mint, SetAuthority, Token, TokenAccount, Transfer};
+use anchor_spl::token::{Mint, Token, TokenAccount, Transfer};
 
 declare_id!("Fg6PaFpoGXkYsidMpWTK6W2BeZ7FEfcYkg476zPFsLnS");
 
@@ -26,29 +25,10 @@ pub mod contracts {
         let mint = &ctx.accounts.mint;
         let vault = &ctx.accounts.vault;
 
-        msg!("enter ix");
-
-        let (vault_authority, _vault_authority_bump) = Pubkey::find_program_address(
-            &[
-                b"authority",
-                buidl_account.key().as_ref(),
-                mint.key().as_ref(),
-            ],
-            ctx.program_id,
-        );
-
-        msg!("vault_authority: {:?}", vault_authority);
-
         buidl_account.owner = *owner.key;
         buidl_account.db_id = db_id;
         buidl_account.vault_account = vault.key();
         buidl_account.token = mint.key();
-
-        token::set_authority(
-            ctx.accounts.into_set_authority_context(),
-            AuthorityType::AccountOwner,
-            Some(vault_authority.key()),
-        )?;
 
         Ok(())
     }
@@ -184,7 +164,7 @@ pub mod contracts {
         let vault = &ctx.accounts.vault;
         let token_program = &ctx.accounts.token_program;
         let buidl_account = &ctx.accounts.buidl_account;
-        let vault_authority = &ctx.accounts.vault_authority;
+        // let vault_authority = &ctx.accounts.vault_authority;
         let mint = &ctx.accounts.mint;
 
         let clock = Clock::get()?;
@@ -196,25 +176,49 @@ pub mod contracts {
 
         let withdrawer_token_account = &ctx.accounts.withdrawer_token_account;
 
+        let buidl_account_key = buidl_account.key();
+        let mint_key = mint.key();
+
+        let (_vault, vault_bump) = Pubkey::find_program_address(
+            &[b"vault", buidl_account.key().as_ref(), mint.key().as_ref()],
+            ctx.program_id,
+        );
+
+        let vault_seeds = &[
+            b"vault",
+            buidl_account_key.as_ref(),
+            mint_key.as_ref(),
+            &[vault_bump],
+        ];
+
         transfer(
-            CpiContext::new_with_signer(
+            CpiContext::new(
                 token_program.to_account_info(),
                 Transfer {
                     from: vault.to_account_info(),
                     to: withdrawer_token_account.to_account_info(),
-                    authority: vault_authority.to_account_info(),
+                    authority: vault.to_account_info(),
                 },
-                &[&[
-                    b"authority",
-                    buidl_account.key().as_ref(),
-                    mint.key().as_ref(),
-                ]],
-            ),
+            )
+            .with_signer(&[vault_seeds]),
             proposal_account.amount,
         )?;
+
         // } else {
         //     return Err(ErrorCode::ProposalNotOver.into());
         // }
+
+        Ok(())
+    }
+
+    pub fn post_update(ctx: Context<PostUpdate>, db_id: String, update_number: i64) -> Result<()> {
+        let clock = Clock::get()?;
+        let update_account = &mut ctx.accounts.update_account;
+
+        update_account.buidl_account = ctx.accounts.buidl_account.key();
+        update_account.db_id = db_id;
+        update_account.timestamp = clock.unix_timestamp;
+        update_account.update_number = update_number;
 
         Ok(())
     }
@@ -229,12 +233,12 @@ pub struct InitializeBuidl<'info> {
     #[account()]
     pub system_program: Program<'info, System>,
     #[account(
-        init_if_needed,
+        init,
         payer = owner,
         seeds = [b"vault".as_ref(), buidl_account.key().as_ref(), mint.key().as_ref()],
         bump,
         token::mint = mint,
-        token::authority = owner
+        token::authority = vault
     )]
     pub vault: Account<'info, TokenAccount>,
     pub mint: Account<'info, Mint>,
@@ -247,13 +251,6 @@ pub struct Deposit<'info> {
     #[account(mut)]
     pub vault: Account<'info, TokenAccount>,
     pub token_program: Program<'info, Token>,
-    #[account(
-        mut,
-        seeds = [b"authority", buidl_account.key().as_ref(), mint.key().as_ref()],
-        bump
-    )]
-    /// CHECK: we are not writing to this account
-    pub vault_authority: AccountInfo<'info>,
     /// CHECK: we are not writing to this account
     #[account(mut)]
     pub mint: AccountInfo<'info>,
@@ -308,21 +305,41 @@ pub struct CheckProposal<'info> {
     #[account(mut)]
     pub proposal_account: Account<'info, ProposalAccount>,
     #[account(mut)]
-    pub buidl_account: Account<'info, BuidlAccount>,
-    #[account(mut)]
+    /// CHECK: not writing to the account
+    pub buidl_account: AccountInfo<'info>,
+    #[account(
+        mut,
+        seeds = [b"vault", buidl_account.key().as_ref(), mint.key().as_ref()],
+        bump
+    )]
     pub vault: Account<'info, TokenAccount>,
     pub token_program: Program<'info, Token>,
     #[account(mut)]
     /// CHECK: we are just depositting tokens
     pub withdrawer_token_account: AccountInfo<'info>,
-    #[account(
-        mut,
-        seeds = [b"authority", buidl_account.key().as_ref(), mint.key().as_ref()],
-        bump
-    )]
-    /// CHECK: we are not writing to this account
-    pub vault_authority: AccountInfo<'info>,
+    // #[account(
+    //     mut,
+    //     seeds = [b"authority", buidl_account.key().as_ref(), mint.key().as_ref()],
+    //     bump
+    // )]
+    // /// CHECK: we are not writing to this account
+    // pub vault_authority: AccountInfo<'info>,
     pub mint: Account<'info, Mint>,
+}
+
+#[derive(Accounts)]
+pub struct PostUpdate<'info> {
+    pub buidl_account: Account<'info, BuidlAccount>,
+    pub system_program: Program<'info, System>,
+    pub rent: Sysvar<'info, Rent>,
+    #[account(
+        init,
+        payer = owner,
+        space = UpdateAccount::LEN,
+    )]
+    pub update_account: Account<'info, UpdateAccount>,
+    #[account(mut)]
+    pub owner: Signer<'info>,
 }
 
 #[account]
@@ -397,14 +414,20 @@ impl BackerVoteAccount {
         + BOOL_LENGTH; // voted
 }
 
-impl<'info> InitializeBuidl<'info> {
-    fn into_set_authority_context(&self) -> CpiContext<'_, '_, '_, 'info, SetAuthority<'info>> {
-        let cpi_accounts = SetAuthority {
-            account_or_mint: self.vault.to_account_info(),
-            current_authority: self.owner.to_account_info(),
-        };
-        CpiContext::new(self.token_program.to_account_info(), cpi_accounts)
-    }
+#[account]
+pub struct UpdateAccount {
+    pub buidl_account: Pubkey,
+    pub db_id: String,
+    pub timestamp: i64,
+    pub update_number: i64,
+}
+
+impl UpdateAccount {
+    pub const LEN: usize = DISCRIMINATOR_LENGTH // discriminator
+        + PUBLIC_KEY_LENGTH // buidl account
+        + DB_ID_LENGTH // DB ID
+        + I64_LENGTH // timestamp
+        + I64_LENGTH; // update number
 }
 
 #[error_code]

@@ -57,16 +57,6 @@ describe("contracts", () => {
       program.programId
     );
 
-    const [vaultAuthorityAddress] =
-      anchor.web3.PublicKey.findProgramAddressSync(
-        [
-          Buffer.from("authority"),
-          buidlAccount.publicKey.toBuffer(),
-          mint.toBuffer(),
-        ],
-        program.programId
-      );
-
     const tx = await program.methods
       .initializeBuidl(DB_ID)
       .accounts({
@@ -110,16 +100,11 @@ describe("contracts", () => {
     assert.equal(buidlAccountData.dbId, DB_ID);
 
     assert.equal(fetchedVault.amount.toString(), "1000");
-    assert.equal(
-      fetchedVault.owner.toString(),
-      vaultAuthorityAddress.toString()
-    );
 
     return {
       userAta,
       vaultPDAAddress,
       mint,
-      vaultAuthorityAddress,
       buidlAccount,
     };
   };
@@ -128,7 +113,6 @@ describe("contracts", () => {
     userAta: Account,
     vaultPDAAddress: anchor.web3.PublicKey,
     mint: anchor.web3.PublicKey,
-    vaultAuthorityAddress: anchor.web3.PublicKey,
     buidlAccount: anchor.web3.Keypair
   ) => {
     const backerAccountPDA = anchor.web3.PublicKey.findProgramAddressSync(
@@ -148,7 +132,7 @@ describe("contracts", () => {
         vault: vaultPDAAddress,
         mint: mint,
         tokenProgram: TOKEN_PROGRAM_ID,
-        vaultAuthority: vaultAuthorityAddress,
+        // vaultAuthority: vaultAuthorityAddress,
         backerAccount: backerAccountPDA,
         buidlAccount: buidlAccount.publicKey,
         systemProgram: anchor.web3.SystemProgram.programId,
@@ -176,16 +160,22 @@ describe("contracts", () => {
 
   const createProposal = async (
     vaultPDAAddress: anchor.web3.PublicKey,
-    buidlAccount: anchor.web3.Keypair
+    buidlAccount: anchor.web3.Keypair,
+    mint: anchor.web3.PublicKey
   ) => {
     const proposalAccount = anchor.web3.Keypair.generate();
-    const withdrawer_token_account = anchor.web3.PublicKey.unique();
+    const withdrawer_token_account = await getOrCreateAssociatedTokenAccount(
+      connection,
+      userWallet.payer,
+      mint,
+      userWallet.publicKey
+    );
 
     const proposalTx = await program.methods
       .createProposal(
         new anchor.BN(1000),
         DB_ID,
-        withdrawer_token_account,
+        withdrawer_token_account.address,
         new anchor.BN(7)
       )
       .accounts({
@@ -217,7 +207,7 @@ describe("contracts", () => {
     assert.equal(proposalAccountData.dbId, DB_ID);
     assert.equal(
       proposalAccountData.withdrawerTokenAccount.toString(),
-      withdrawer_token_account.toString()
+      withdrawer_token_account.address.toString()
     );
 
     return {
@@ -271,59 +261,23 @@ describe("contracts", () => {
   });
 
   it("Deposits from another wallet", async () => {
-    const {
-      userAta,
-      vaultPDAAddress,
-      mint,
-      vaultAuthorityAddress,
-      buidlAccount,
-    } = await initBuidl();
+    const { userAta, vaultPDAAddress, mint, buidlAccount } = await initBuidl();
 
-    await depositTokens(
-      userAta,
-      vaultPDAAddress,
-      mint,
-      vaultAuthorityAddress,
-      buidlAccount
-    );
+    await depositTokens(userAta, vaultPDAAddress, mint, buidlAccount);
   });
 
   it("Creates a proposal", async () => {
-    const {
-      userAta,
-      vaultPDAAddress,
-      mint,
-      vaultAuthorityAddress,
-      buidlAccount,
-    } = await initBuidl();
+    const { userAta, vaultPDAAddress, mint, buidlAccount } = await initBuidl();
 
-    await depositTokens(
-      userAta,
-      vaultPDAAddress,
-      mint,
-      vaultAuthorityAddress,
-      buidlAccount
-    );
+    await depositTokens(userAta, vaultPDAAddress, mint, buidlAccount);
 
-    await createProposal(vaultPDAAddress, buidlAccount);
+    await createProposal(vaultPDAAddress, buidlAccount, mint);
   });
 
   it("Fails to create a proposal if the proposal amount is higher than available amount", async () => {
-    const {
-      userAta,
-      vaultPDAAddress,
-      mint,
-      vaultAuthorityAddress,
-      buidlAccount,
-    } = await initBuidl();
+    const { userAta, vaultPDAAddress, mint, buidlAccount } = await initBuidl();
 
-    await depositTokens(
-      userAta,
-      vaultPDAAddress,
-      mint,
-      vaultAuthorityAddress,
-      buidlAccount
-    );
+    await depositTokens(userAta, vaultPDAAddress, mint, buidlAccount);
 
     const proposalAccount = anchor.web3.Keypair.generate();
 
@@ -353,25 +307,14 @@ describe("contracts", () => {
   });
 
   it("can vote on a proposal", async () => {
-    const {
-      userAta,
-      vaultPDAAddress,
-      mint,
-      vaultAuthorityAddress,
-      buidlAccount,
-    } = await initBuidl();
+    const { userAta, vaultPDAAddress, mint, buidlAccount } = await initBuidl();
 
-    await depositTokens(
-      userAta,
-      vaultPDAAddress,
-      mint,
-      vaultAuthorityAddress,
-      buidlAccount
-    );
+    await depositTokens(userAta, vaultPDAAddress, mint, buidlAccount);
 
     const { proposalAccount } = await createProposal(
       vaultPDAAddress,
-      buidlAccount
+      buidlAccount,
+      mint
     );
 
     const voterPDA = anchor.web3.PublicKey.findProgramAddressSync(
@@ -481,7 +424,7 @@ describe("contracts", () => {
       userAta,
       vaultPDAAddress,
       mint,
-      vaultAuthorityAddress,
+      // vaultAuthorityAddress,
       buidlAccount,
     } = await initBuidl();
 
@@ -489,13 +432,14 @@ describe("contracts", () => {
       userAta,
       vaultPDAAddress,
       mint,
-      vaultAuthorityAddress,
+      // vaultAuthorityAddress,
       buidlAccount
     );
 
     const { proposalAccount, withdrawer_token_account } = await createProposal(
       vaultPDAAddress,
-      buidlAccount
+      buidlAccount,
+      mint
     );
 
     await createAccountAndVote(proposalAccount.publicKey, true);
@@ -507,6 +451,17 @@ describe("contracts", () => {
     await createAccountAndVote(proposalAccount.publicKey, true);
 
     await createAccountAndVote(proposalAccount.publicKey, true);
+
+    const [derivedVaultPDA] = anchor.web3.PublicKey.findProgramAddressSync(
+      [
+        Buffer.from("vault"),
+        buidlAccount.publicKey.toBuffer(),
+        mint.toBuffer(),
+      ],
+      program.programId
+    );
+
+    // console.log(vaultAuthorityAddress);
 
     const checkProposalTx = await program.methods
       .checkProposal()
@@ -515,10 +470,72 @@ describe("contracts", () => {
         proposalAccount: proposalAccount.publicKey,
         vault: vaultPDAAddress,
         tokenProgram: TOKEN_PROGRAM_ID,
-        withdrawerTokenAccount: withdrawer_token_account,
-        vaultAuthority: vaultAuthorityAddress,
+        withdrawerTokenAccount: withdrawer_token_account.address,
         mint,
       })
       .rpc();
+
+    const vaultAccount = await getAccount(connection, vaultPDAAddress);
+    assert.equal(vaultAccount.amount.toString(), "500");
+
+    const withdrawerTokenAccountData = await getAccount(
+      connection,
+      withdrawer_token_account.address
+    );
+    assert.equal(withdrawerTokenAccountData.amount.toString(), "1500");
+  });
+
+  it("can post an update", async () => {
+    const { userAta, vaultPDAAddress, mint, buidlAccount } = await initBuidl();
+
+    await depositTokens(userAta, vaultPDAAddress, mint, buidlAccount);
+
+    const update1Account = anchor.web3.Keypair.generate();
+
+    const update1Sig = await program.methods
+      .postUpdate(DB_ID, new anchor.BN(1))
+      .accounts({
+        buidlAccount: buidlAccount.publicKey,
+        updateAccount: update1Account.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .signers([update1Account])
+      .rpc();
+
+    // console.log("update1Sig: ", update1Sig);
+
+    const update1AccountData = await program.account.updateAccount.fetch(
+      update1Account.publicKey
+    );
+    assert.equal(update1AccountData.dbId, DB_ID);
+    assert.equal(
+      update1AccountData.buidlAccount.toString(),
+      buidlAccount.publicKey.toString()
+    );
+    assert.equal(update1AccountData.updateNumber.toString(), "1");
+
+    const update2Account = anchor.web3.Keypair.generate();
+
+    const update2Sig = await program.methods
+      .postUpdate(DB_ID, new anchor.BN(2))
+      .accounts({
+        buidlAccount: buidlAccount.publicKey,
+        updateAccount: update2Account.publicKey,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .signers([update2Account])
+      .rpc();
+
+    // console.log("update2Sig: ", update2Sig);
+
+    const update2AccountData = await program.account.updateAccount.fetch(
+      update2Account.publicKey
+    );
+    assert.equal(update2AccountData.dbId, DB_ID);
+    assert.equal(
+      update2AccountData.buidlAccount.toString(),
+      buidlAccount.publicKey.toString()
+    );
+    assert.equal(update2AccountData.updateNumber.toString(), "2");
   });
 });
