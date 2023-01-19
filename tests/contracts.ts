@@ -473,16 +473,24 @@ describe("contracts", () => {
         withdrawerTokenAccount: withdrawer_token_account.address,
         mint,
       })
-      .rpc();
+      .rpc()
+      .catch((err) => {
+        assert.equal(
+          err.message,
+          "AnchorError occurred. Error Code: ProposalNotOver. Error Number: 6005. Error Message: The proposal is ongoing. You can't withdraw yet."
+        );
+      });
 
-    const vaultAccount = await getAccount(connection, vaultPDAAddress);
-    assert.equal(vaultAccount.amount.toString(), "500");
+    // uncomment the following when running tests with the timestamp check commented out in contract
 
-    const withdrawerTokenAccountData = await getAccount(
-      connection,
-      withdrawer_token_account.address
-    );
-    assert.equal(withdrawerTokenAccountData.amount.toString(), "1500");
+    // const vaultAccount = await getAccount(connection, vaultPDAAddress);
+    // assert.equal(vaultAccount.amount.toString(), "500");
+
+    // const withdrawerTokenAccountData = await getAccount(
+    //   connection,
+    //   withdrawer_token_account.address
+    // );
+    // assert.equal(withdrawerTokenAccountData.amount.toString(), "1500");
   });
 
   it("can post an update", async () => {

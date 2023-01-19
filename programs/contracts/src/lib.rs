@@ -12,6 +12,59 @@ const U64_LENGTH: usize = 8;
 const I64_LENGTH: usize = 8;
 const BOOL_LENGTH: usize = 1;
 
+// events
+#[event]
+pub struct BuidlInitialized {
+    pub owner: Pubkey,
+    pub db_id: String,
+    pub vault_account: Pubkey,
+    pub token: Pubkey,
+}
+
+#[event]
+pub struct TokensDeposited {
+    pub depositor: Pubkey,
+    pub amount: u64,
+    pub buidl_account: Pubkey,
+    pub buidl_db_id: String,
+}
+
+#[event]
+pub struct ProposalCreated {
+    pub buidl_account: Pubkey,
+    pub buidl_db_id: String,
+    pub proposal_account: Pubkey,
+    pub proposal_db_id: String,
+    pub amount: u64,
+    pub withdrawer_token_account: Pubkey,
+    pub end_timestamp: i64,
+}
+
+#[event]
+pub struct ProposalVoted {
+    pub voter: Pubkey,
+    pub proposal_account: Pubkey,
+    pub proposal_db_id: String,
+    pub upvote: bool,
+}
+
+#[event]
+pub struct ProposalWithdrawn {
+    pub withdrawer_token_account: Pubkey,
+    pub proposal_account: Pubkey,
+    pub proposal_db_id: String,
+    pub amount: u64,
+}
+
+#[event]
+pub struct UpdatePosted {
+    pub updater: Pubkey,
+    pub buidl_account: Pubkey,
+    pub buidl_db_id: String,
+    pub update_db_id: String,
+    pub update_number: i64,
+}
+
 #[program]
 pub mod contracts {
 
@@ -26,9 +79,16 @@ pub mod contracts {
         let vault = &ctx.accounts.vault;
 
         buidl_account.owner = *owner.key;
-        buidl_account.db_id = db_id;
+        buidl_account.db_id = db_id.clone();
         buidl_account.vault_account = vault.key();
         buidl_account.token = mint.key();
+
+        emit!(BuidlInitialized {
+            owner: *owner.key,
+            db_id: db_id,
+            vault_account: vault.key(),
+            token: mint.key()
+        });
 
         Ok(())
     }
@@ -76,6 +136,13 @@ pub mod contracts {
             amount,
         )?;
 
+        emit!(TokensDeposited {
+            depositor: depositor.key(),
+            amount: amount,
+            buidl_account: buidl_account.key(),
+            buidl_db_id: buidl_account.db_id.clone()
+        });
+
         Ok(())
     }
 
@@ -101,13 +168,23 @@ pub mod contracts {
         }
 
         proposal_account.buidl_account = buidl_account.key();
-        proposal_account.db_id = db_id;
+        proposal_account.db_id = db_id.clone();
         proposal_account.amount = amount;
         proposal_account.upvotes = 0;
         proposal_account.downvotes = 0;
 
         proposal_account.end_timestamp = clock.unix_timestamp + (end_after_days * 86400);
         proposal_account.withdrawer_token_account = withdrawer_token_account;
+
+        emit!(ProposalCreated {
+            proposal_account: proposal_account.key(),
+            proposal_db_id: db_id,
+            amount: amount,
+            withdrawer_token_account: withdrawer_token_account,
+            end_timestamp: proposal_account.end_timestamp,
+            buidl_account: buidl_account.key(),
+            buidl_db_id: buidl_account.db_id.clone()
+        });
 
         Ok(())
     }
@@ -156,6 +233,13 @@ pub mod contracts {
 
         voter_account.voted = true;
 
+        emit!(ProposalVoted {
+            voter: ctx.accounts.voter.key(),
+            proposal_account: proposal_account.key(),
+            proposal_db_id: proposal_account.db_id.clone(),
+            upvote: upvote,
+        });
+
         Ok(())
     }
 
@@ -164,49 +248,54 @@ pub mod contracts {
         let vault = &ctx.accounts.vault;
         let token_program = &ctx.accounts.token_program;
         let buidl_account = &ctx.accounts.buidl_account;
-        // let vault_authority = &ctx.accounts.vault_authority;
         let mint = &ctx.accounts.mint;
 
         let clock = Clock::get()?;
 
-        // if clock.unix_timestamp > proposal_account.end_timestamp {
-        if proposal_account.upvotes <= proposal_account.downvotes {
-            return Err(ErrorCode::ProposalNotPassed.into());
+        if clock.unix_timestamp > proposal_account.end_timestamp {
+            if proposal_account.upvotes <= proposal_account.downvotes {
+                return Err(ErrorCode::ProposalNotPassed.into());
+            }
+
+            let withdrawer_token_account = &ctx.accounts.withdrawer_token_account;
+
+            let buidl_account_key = buidl_account.key();
+            let mint_key = mint.key();
+
+            let (_vault, vault_bump) = Pubkey::find_program_address(
+                &[b"vault", buidl_account.key().as_ref(), mint.key().as_ref()],
+                ctx.program_id,
+            );
+
+            let vault_seeds = &[
+                b"vault",
+                buidl_account_key.as_ref(),
+                mint_key.as_ref(),
+                &[vault_bump],
+            ];
+
+            transfer(
+                CpiContext::new(
+                    token_program.to_account_info(),
+                    Transfer {
+                        from: vault.to_account_info(),
+                        to: withdrawer_token_account.to_account_info(),
+                        authority: vault.to_account_info(),
+                    },
+                )
+                .with_signer(&[vault_seeds]),
+                proposal_account.amount,
+            )?;
+
+            emit!(ProposalWithdrawn {
+                proposal_account: proposal_account.key(),
+                proposal_db_id: proposal_account.db_id.clone(),
+                amount: proposal_account.amount,
+                withdrawer_token_account: withdrawer_token_account.key(),
+            });
+        } else {
+            return Err(ErrorCode::ProposalNotOver.into());
         }
-
-        let withdrawer_token_account = &ctx.accounts.withdrawer_token_account;
-
-        let buidl_account_key = buidl_account.key();
-        let mint_key = mint.key();
-
-        let (_vault, vault_bump) = Pubkey::find_program_address(
-            &[b"vault", buidl_account.key().as_ref(), mint.key().as_ref()],
-            ctx.program_id,
-        );
-
-        let vault_seeds = &[
-            b"vault",
-            buidl_account_key.as_ref(),
-            mint_key.as_ref(),
-            &[vault_bump],
-        ];
-
-        transfer(
-            CpiContext::new(
-                token_program.to_account_info(),
-                Transfer {
-                    from: vault.to_account_info(),
-                    to: withdrawer_token_account.to_account_info(),
-                    authority: vault.to_account_info(),
-                },
-            )
-            .with_signer(&[vault_seeds]),
-            proposal_account.amount,
-        )?;
-
-        // } else {
-        //     return Err(ErrorCode::ProposalNotOver.into());
-        // }
 
         Ok(())
     }
@@ -216,9 +305,17 @@ pub mod contracts {
         let update_account = &mut ctx.accounts.update_account;
 
         update_account.buidl_account = ctx.accounts.buidl_account.key();
-        update_account.db_id = db_id;
+        update_account.db_id = db_id.clone();
         update_account.timestamp = clock.unix_timestamp;
         update_account.update_number = update_number;
+
+        emit!(UpdatePosted {
+            buidl_account: ctx.accounts.buidl_account.key(),
+            buidl_db_id: ctx.accounts.buidl_account.db_id.clone(),
+            update_db_id: db_id,
+            update_number: update_number,
+            updater: ctx.accounts.payer.key(),
+        });
 
         Ok(())
     }
@@ -317,13 +414,6 @@ pub struct CheckProposal<'info> {
     #[account(mut)]
     /// CHECK: we are just depositting tokens
     pub withdrawer_token_account: AccountInfo<'info>,
-    // #[account(
-    //     mut,
-    //     seeds = [b"authority", buidl_account.key().as_ref(), mint.key().as_ref()],
-    //     bump
-    // )]
-    // /// CHECK: we are not writing to this account
-    // pub vault_authority: AccountInfo<'info>,
     pub mint: Account<'info, Mint>,
 }
 
@@ -334,12 +424,12 @@ pub struct PostUpdate<'info> {
     pub rent: Sysvar<'info, Rent>,
     #[account(
         init,
-        payer = owner,
+        payer = payer,
         space = UpdateAccount::LEN,
     )]
     pub update_account: Account<'info, UpdateAccount>,
     #[account(mut)]
-    pub owner: Signer<'info>,
+    pub payer: Signer<'info>,
 }
 
 #[account]
